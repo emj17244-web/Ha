@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Spin The Wheel</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root{ --bg:#0e0a1a; --gold:#ffd65c; }
+  *{ box-sizing:border-box; }
+  body{
+    margin:0; min-height:100vh; background:var(--bg);
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    color:#fff; padding:24px;
+  }
+  h1{ font-size:19px; letter-spacing:1px; color:var(--gold); margin:0 0 24px; text-transform:uppercase; text-align:center; }
+  .wheel-wrap{ position:relative; width:min(84vw,340px); aspect-ratio:1; margin-bottom:30px; }
+  #wheel{ width:100%; height:100%; display:block; filter:drop-shadow(0 10px 30px rgba(0,0,0,.5)); }
+  .pointer{
+    position:absolute; top:-6px; left:50%; transform:translateX(-50%);
+    width:0; height:0; border-left:16px solid transparent; border-right:16px solid transparent;
+    border-top:26px solid #ff3c3c; filter:drop-shadow(0 2px 4px rgba(0,0,0,.4)); z-index:5;
+  }
+  #spinBtn{
+    background:linear-gradient(180deg,#ffd65c,#ffb200); color:#241a00; border:none;
+    padding:16px 46px; border-radius:999px; font-size:17px; font-weight:700;
+    letter-spacing:.5px; box-shadow:0 8px 20px rgba(255,178,0,.35);
+  }
+  #spinBtn:active{ transform:scale(.97); }
+  #spinBtn:disabled{ opacity:.5; }
+  .result{
+    margin-top:22px; text-align:center; opacity:0; transform:translateY(10px);
+    transition:opacity .5s ease, transform .5s ease; min-height:60px;
+  }
+  .result.show{ opacity:1; transform:translateY(0); }
+  .result .amt{ font-size:28px; font-weight:800; color:var(--gold); margin-bottom:4px; }
+  .result .sub{ font-size:14px; color:#c9c4dd; }
+</style>
+</head>
+<body>
+  <h1 id="brand">SPIN THE WHEEL</h1>
+  <div class="wheel-wrap">
+    <div class="pointer"></div>
+    <canvas id="wheel" width="640" height="640"></canvas>
+  </div>
+  <button id="spinBtn">SPIN NOW</button>
+  <div class="result" id="result">
+    <div class="amt" id="resultAmt"></div>
+    <div class="sub" id="resultSub"></div>
+  </div>
+
+<script>
+// --- Telegram WebApp setup ---
+var tg = window.Telegram ? window.Telegram.WebApp : null;
+if (tg) { tg.ready(); tg.expand(); }
+
+// --- Read the already-decided result from the URL (the bot decided this
+// fairly BEFORE opening this page and already credited the balance — this
+// page is purely a visual flourish, it never talks back to the bot or
+// touches any money itself). ---
+var params = new URLSearchParams(window.location.search);
+var labels = (params.get('labels') || 'Try Again').split('|');
+var chosenIndex = parseInt(params.get('index') || '0', 10);
+var amount = parseFloat(params.get('amount') || '0');
+var label = params.get('label') || labels[chosenIndex] || '';
+var brand = params.get('brand') || 'SPIN THE WHEEL';
+document.getElementById('brand').textContent = brand;
+
+// --- Draw the wheel on canvas (same palette style as the bot's other
+// branded images, no emoji anywhere — plain text/shapes only). ---
+var colors = ['#ff9100', '#241e5c', '#ffc72c', '#d62a00'];
+var textColors = ['#2e1800', '#ebecf8', '#2e1800', '#ffffff'];
+
+var canvas = document.getElementById('wheel');
+var ctx = canvas.getContext('2d');
+var size = canvas.width;
+var cx = size / 2, cy = size / 2, r = size / 2 - 6;
+var n = labels.length;
+var segAngle = (2 * Math.PI) / n;
+
+function drawWheel() {
+  ctx.clearRect(0, 0, size, size);
+  for (var i = 0; i < n; i++) {
+    var start = i * segAngle, end = (i + 1) * segAngle;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.arc(cx, cy, r, start, end);
+    ctx.closePath();
+    ctx.fillStyle = colors[i % colors.length];
+    ctx.fill();
+    ctx.strokeStyle = '#140e02';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+  }
+  ctx.strokeStyle = '#140e02';
+  ctx.lineWidth = 5;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, 2 * Math.PI);
+  ctx.stroke();
+
+  ctx.font = '600 26px -apple-system, Segoe UI, Roboto, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  var labelR = r * 0.62;
+  for (var j = 0; j < n; j++) {
+    var mid = (j + 0.5) * segAngle;
+    var lx = cx + labelR * Math.cos(mid);
+    var ly = cy + labelR * Math.sin(mid);
+    ctx.fillStyle = textColors[j % textColors.length];
+    ctx.fillText(labels[j], lx, ly);
+  }
+
+  var hubR = size * 0.06;
+  ctx.beginPath();
+  ctx.arc(cx, cy, hubR, 0, 2 * Math.PI);
+  ctx.fillStyle = '#140e02';
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(cx, cy, hubR * 0.6, 0, 2 * Math.PI);
+  ctx.fillStyle = '#ffc72c';
+  ctx.fill();
+}
+drawWheel();
+
+// --- Spin animation: a single CSS transition (hardware-accelerated, so it
+// runs buttery-smooth at the device's real refresh rate) instead of GIF
+// frames — this is what gives it the "real" native-app feel. ---
+var spinBtn = document.getElementById('spinBtn');
+var resultEl = document.getElementById('result');
+var resultAmt = document.getElementById('resultAmt');
+var resultSub = document.getElementById('resultSub');
+
+spinBtn.addEventListener('click', function () {
+  spinBtn.disabled = true;
+
+  // Canvas angles (like PIL/most 2D graphics) are measured clockwise from
+  // the 3-o'clock position, because the y-axis points downward. The
+  // pointer sits at the top of the wheel = 270 in that same convention.
+  // Rotating the element by R degrees clockwise moves a point originally
+  // at angle theta to (theta + R). We want the chosen segment's center to
+  // land at the pointer, so: R = (pointerDeg - theta) mod 360, plus a few
+  // full spins so it visibly spins first instead of snapping into place.
+  var thetaDeg = (chosenIndex + 0.5) * (360 / n);
+  var pointerDeg = 270;
+  var spins = 5;
+  var base = ((pointerDeg - thetaDeg) % 360 + 360) % 360;
+  var targetDeg = base + 360 * spins;
+
+  canvas.style.transition = 'transform 5.2s cubic-bezier(0.12, 0.72, 0.1, 1)';
+  canvas.style.transform = 'rotate(' + targetDeg + 'deg)';
+
+  canvas.addEventListener('transitionend', function onEnd() {
+    canvas.removeEventListener('transitionend', onEnd);
+    if (amount > 0) {
+      resultAmt.textContent = label + ' Won!';
+      resultSub.textContent = '\u20B9' + amount.toFixed(2) + ' added to your wallet';
+    } else {
+      resultAmt.textContent = 'Better Luck Next Time!';
+      resultSub.textContent = 'Try again on your next big deposit';
+    }
+    resultEl.classList.add('show');
+    if (tg && tg.HapticFeedback) {
+      tg.HapticFeedback.notificationOccurred(amount > 0 ? 'success' : 'warning');
+    }
+    setTimeout(function () { if (tg) tg.close(); }, 3500);
+  }, { once: true });
+});
+</script>
+</body>
+</html>

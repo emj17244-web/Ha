@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Scratch Card Demo</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root{ --bg:#0e0a1a; --gold:#ffd65c; }
+  *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body{
+    margin:0; min-height:100vh; background:var(--bg);
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    color:#fff; padding:24px; user-select:none;
+  }
+  h1{ font-size:19px; letter-spacing:1px; color:var(--gold); margin:0 0 10px; text-transform:uppercase; text-align:center; }
+  .sub{ font-size:13px; color:#c9c4dd; margin-bottom:26px; text-align:center; }
+
+  .card-wrap{
+    position:relative; width:min(84vw,320px); aspect-ratio:1.5;
+    border-radius:20px; overflow:hidden;
+    box-shadow:0 14px 34px rgba(0,0,0,.55);
+  }
+  .prize-layer{
+    position:absolute; inset:0;
+    background:linear-gradient(160deg,#2a2060,#1a1440);
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    text-align:center; padding:16px;
+  }
+  .prize-layer .amt{ font-size:34px; font-weight:800; color:var(--gold); margin-bottom:6px; }
+  .prize-layer .label{ font-size:13px; color:#c9c4dd; }
+
+  canvas{ position:absolute; inset:0; width:100%; height:100%; touch-action:none; cursor:pointer; }
+
+  .hint{
+    margin-top:22px; font-size:13px; color:#9a94b8; text-align:center;
+    opacity:1; transition:opacity .4s ease;
+  }
+  .hint.hide{ opacity:0; }
+
+  .result{
+    margin-top:22px; text-align:center; opacity:0; transform:translateY(10px);
+    transition:opacity .5s ease, transform .5s ease; min-height:50px;
+  }
+  .result.show{ opacity:1; transform:translateY(0); }
+  .result .big{ font-size:24px; font-weight:800; color:var(--gold); margin-bottom:4px; }
+  .result .small{ font-size:13px; color:#c9c4dd; }
+
+  #claimBtn{
+    margin-top:16px; background:linear-gradient(180deg,#ffd65c,#ffb200); color:#241a00; border:none;
+    padding:14px 40px; border-radius:999px; font-size:15px; font-weight:700;
+    letter-spacing:.5px; box-shadow:0 8px 20px rgba(255,178,0,.35);
+    opacity:0; transform:translateY(10px); pointer-events:none;
+    transition:opacity .4s ease, transform .4s ease;
+  }
+  #claimBtn.show{ opacity:1; transform:translateY(0); pointer-events:auto; }
+  #claimBtn:active{ transform:scale(.97); }
+</style>
+</head>
+<body>
+  <h1>Giveaway Reward</h1>
+  <div class="sub" id="subText">Scratch to reveal your reward!</div>
+
+  <div class="card-wrap">
+    <div class="prize-layer">
+      <div class="amt" id="prizeAmt">₹50</div>
+      <div class="label" id="prizeLabel">Bonus Cashback</div>
+    </div>
+    <canvas id="scratchCanvas"></canvas>
+  </div>
+
+  <div class="hint" id="hint">👆 Card ko scratch karke apna reward dekho</div>
+
+  <div class="result" id="result">
+    <div class="big" id="resultBig"></div>
+    <div class="small" id="resultSmall"></div>
+  </div>
+
+  <button id="claimBtn">🎁 Claim Now</button>
+
+<script>
+var tg = window.Telegram ? window.Telegram.WebApp : null;
+if (tg) { tg.ready(); tg.expand(); }
+
+// --- Reads the giveaway_id + the (not-yet-credited) amount from the URL.
+// The bot has already reserved this user's slot and decided the amount
+// before this page opened, but has NOT credited it or told anyone yet —
+// that only happens once the user scratches AND taps "Claim Now" below,
+// which sends the result back to the bot via Telegram.WebApp.sendData().
+// This is the one thing that actually triggers the payout — see
+// giveaway_webapp_data_handler in main.py. ---
+var params = new URLSearchParams(window.location.search);
+var amount = parseFloat(params.get('amount') || '0');
+var label = params.get('label') || 'Reward';
+var giveawayId = params.get('giveaway_id');
+var prizeLabel = '₹' + amount.toFixed(2);
+var prizeSub = label;
+document.getElementById('prizeAmt').textContent = prizeLabel;
+document.getElementById('prizeLabel').textContent = prizeSub;
+
+if (!giveawayId) {
+  document.getElementById('subText').textContent = 'Invalid link — reopen this from the bot.';
+}
+
+var canvas = document.getElementById('scratchCanvas');
+var ctx = canvas.getContext('2d');
+var hint = document.getElementById('hint');
+var resultEl = document.getElementById('result');
+var resultBig = document.getElementById('resultBig');
+var resultSmall = document.getElementById('resultSmall');
+var claimBtn = document.getElementById('claimBtn');
+
+var revealed = false;
+var dpr = window.devicePixelRatio || 1;
+
+function sizeCanvas() {
+  var rect = canvas.getBoundingClientRect();
+  canvas.width = rect.width * dpr;
+  canvas.height = rect.height * dpr;
+  drawScratchLayer();
+}
+
+function drawScratchLayer() {
+  var w = canvas.width, h = canvas.height;
+  // Brushed-silver foil look
+  var grad = ctx.createLinearGradient(0, 0, w, h);
+  grad.addColorStop(0, '#b8bcc4');
+  grad.addColorStop(0.5, '#e4e7ec');
+  grad.addColorStop(1, '#9498a0');
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, w, h);
+
+  // subtle diagonal texture lines
+  ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+  ctx.lineWidth = 2 * dpr;
+  for (var x = -h; x < w; x += 10 * dpr) {
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x + h, h);
+    ctx.stroke();
+  }
+
+  ctx.fillStyle = '#5b5f68';
+  ctx.font = (18 * dpr) + 'px -apple-system, Segoe UI, Roboto, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('SCRATCH HERE', w / 2, h / 2);
+}
+
+sizeCanvas();
+window.addEventListener('resize', sizeCanvas);
+
+function getPos(e) {
+  var rect = canvas.getBoundingClientRect();
+  var clientX = e.touches ? e.touches[0].clientX : e.clientX;
+  var clientY = e.touches ? e.touches[0].clientY : e.clientY;
+  return {
+    x: (clientX - rect.left) * (canvas.width / rect.width),
+    y: (clientY - rect.top) * (canvas.height / rect.height)
+  };
+}
+
+function scratchAt(x, y) {
+  ctx.globalCompositeOperation = 'destination-out';
+  ctx.beginPath();
+  ctx.arc(x, y, 28 * dpr, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function checkRevealPercent() {
+  if (revealed) return;
+  var data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+  var total = data.length / 4;
+  var cleared = 0;
+  // sample every 8th pixel for performance
+  for (var i = 3; i < data.length; i += 4 * 8) {
+    if (data[i] === 0) cleared++;
+  }
+  var pct = cleared / (total / 8);
+  if (pct > 0.45) {
+    reveal();
+  }
+}
+
+function reveal() {
+  if (revealed) return;
+  revealed = true;
+  var w = canvas.width, h = canvas.height;
+  var fade = 0;
+  function fadeOut() {
+    fade += 0.08;
+    ctx.globalAlpha = Math.max(0, 1 - fade);
+    ctx.globalCompositeOperation = 'source-over';
+    drawScratchLayer();
+    ctx.globalAlpha = 1;
+    if (fade < 1) {
+      requestAnimationFrame(fadeOut);
+    } else {
+      canvas.style.display = 'none';
+    }
+  }
+  fadeOut();
+
+  hint.classList.add('hide');
+  resultBig.textContent = prizeLabel + ' Revealed!';
+  resultSmall.textContent = 'Tap below to claim it — nothing is added until you do.';
+  resultEl.classList.add('show');
+  claimBtn.classList.add('show');
+
+  if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+}
+
+var scratching = false;
+function startScratch(e) {
+  scratching = true;
+  handleMove(e);
+}
+function endScratch() { scratching = false; checkRevealPercent(); }
+function handleMove(e) {
+  if (!scratching || revealed) return;
+  e.preventDefault();
+  var p = getPos(e);
+  scratchAt(p.x, p.y);
+}
+
+canvas.addEventListener('mousedown', startScratch);
+canvas.addEventListener('mousemove', handleMove);
+canvas.addEventListener('mouseup', endScratch);
+canvas.addEventListener('mouseleave', endScratch);
+canvas.addEventListener('touchstart', startScratch, {passive:false});
+canvas.addEventListener('touchmove', handleMove, {passive:false});
+canvas.addEventListener('touchend', endScratch);
+
+claimBtn.addEventListener('click', function () {
+  if (!revealed || !giveawayId) return;  // can't claim before scratching, or with a bad/missing link
+  claimBtn.disabled = true;
+  claimBtn.style.opacity = '0.6';
+  claimBtn.textContent = 'Claiming…';
+  if (tg && tg.HapticFeedback) tg.HapticFeedback.impactOccurred('medium');
+
+  if (tg && tg.sendData) {
+    // This is the ONLY thing in this entire page that touches money — it
+    // sends {giveaway_id} back to the bot, which credits the wallet and
+    // announces the amount in the group ONLY after receiving this. Nothing
+    // before this point (opening the card, scratching it) does anything
+    // except show the reveal animation.
+    tg.sendData(JSON.stringify({ giveaway_id: parseInt(giveawayId, 10) }));
+    // Telegram automatically closes the Mini App right after sendData().
+  } else if (tg) {
+    tg.close();
+  }
+});
+</script>
+</body>
+</html>
